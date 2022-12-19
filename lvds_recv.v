@@ -31,11 +31,46 @@ module lvds_recv #(
     assign SDA = sda_en ? 1'bz : sda_o;
     assign sda_i = SDA; 
 `endif
-
+    wire [DW-1:0] DATA_IN; //单端数据信号
+    wire CLK_IN; //单端时钟信号
+    reg [DW-1:0] data_r;
+    reg group_r;
 /**************************************************************************************/
+//差分输入转单端
+    genvar i;
+    generate
+        for(i=0; i<DW; i=i+1) begin
+            //差分输入BUF原语
+            IBUFDS #(
+                .DIFF_TERM("TRUE"),
+                .IOSTANDARD("LVDS_25")
+            ) u_dbufds (
+                .O(DATA_IN[i]),
+                .I(DATA_P[i]),
+                .IB(DATA_N[i])
+            );
+        end
 
+        IBUFGDS #(
+            .DIFF_TERM("TRUE"),
+            .IOSTANDARD("LVDS_25")
+        ) u_cbufds (
+            .O(CLK_IN),
+            .I(CLK_P),
+            .IB(CLK_N)
+        );
+    endgenerate
 
-
+    always @(posedge CLK_IN or negedge rst_n) begin
+        if(!rst_n) begin
+            data_r <= 0; //TODO：改为同步复位或取消复位
+            group_r <= 0;
+        end
+        else begin
+            data_r <= DATA_IN;
+            group_r <= D_GROUP;     
+        end
+    end
 /**************************************************************************************/
 
 endmodule //lvds_recv
