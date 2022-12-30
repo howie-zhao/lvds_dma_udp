@@ -4,7 +4,7 @@
 module lvds_recv #(
     parameter DW = 15,
     parameter FRAME_NUM = 1024,
-    parameter AXI_DW = 32
+    parameter M_AXIS_TDATA_WIDTH = 32
 )(
     input wire [DW-1:0] DATA_P, //输入15位数据信号的p端
     input wire [DW-1:0] DATA_N, //输入15位数据信号的n端
@@ -22,14 +22,15 @@ module lvds_recv #(
     output wire RST_D, //给A1100数字部分的复位信号 RSTN
     output wire RST_A,  //给A1100模拟部分的复位信号 XSHUTDOWN
     // AXI Stream Interface
-    input wire m_aclk,
-    input wire m_aresetn,
-    input wire m_axis_tready,
-    output wire m_axis_tvalid,
-    output wire m_axis_tlast,
-    //output wire m_axis_tuser,
-    //output wire m_axis_tkeep,
-    output wire [AXI_DW-1:0] m_axis_tdata
+    input wire M_AXIS_ACLK,
+    input wire M_AXIS_ARESETN,
+    input wire M_AXIS_TREADY,
+    output wire M_AXIS_TVALID,
+    output wire M_AXIS_TLAST,
+    //output wire M_AXIS_TUSER,
+    //output wire M_AXIS_TKEEP,
+    output wire [(M_AXIS_TDATA_WIDTH/8)-1:0] M_AXIS_TSTRB,
+    output wire [M_AXIS_TDATA_WIDTH-1:0] M_AXIS_TDATA
 );
 /**************************************************************************************/
 `ifndef ZYNQ_PS_EMIO_IIC
@@ -112,7 +113,7 @@ module lvds_recv #(
 //异步FIFO，packet mode
     fifo u_fifo_recv(
         .wr_clk       (CLK_IN),
-        .rd_clk       (m_aclk),
+        .rd_clk       (M_AXIS_ACLK),
         .srst         (~rst_n),
         .wr_en        (fifo_wr_en),
         .rd_en        (fifo_rd_en),
@@ -129,12 +130,13 @@ module lvds_recv #(
 //1帧数据写入后，拉高输出valid，等待后续DMA的ready（read enable）信号
 //需要在一帧数据结束时拉高tlast信号
 
-    assign m_axis_tvalid = fifo_rd_en_d[1]; //读FIFO有1个cycle的latency
-    assign m_axis_tlast = tx_done;
-    assign m_axis_tdata = tx_data;
+    assign M_AXIS_TVALID = fifo_rd_en_d[1]; //读FIFO有1个cycle的latency
+    assign M_AXIS_TLAST = tx_done;
+    assign M_AXIS_TDATA = tx_data;
+    assign M_AXIS_TSTRB = {(M_AXIS_TDATA_WIDTH/8){1'b1}};
 
-    always @(posedge m_aclk or negedge m_aresetn) begin
-        if(!m_aresetn) begin
+    always @(posedge M_AXIS_ACLK or negedge M_AXIS_ARESETN) begin
+        if(!M_AXIS_ARESETN) begin
             tx_valid <= 0;
         end
         else if(rd_data_cnt >= FRAME_NUM) begin
@@ -144,17 +146,17 @@ module lvds_recv #(
             tx_valid <= 0;
         end
     end
-    assign fifo_rd_en = tx_valid & m_axis_tready;
-    always @(posedge m_aclk or negedge m_aresetn) begin
-        if(!m_aresetn) begin
+    assign fifo_rd_en = tx_valid & M_AXIS_TREADY;
+    always @(posedge M_AXIS_ACLK or negedge M_AXIS_ARESETN) begin
+        if(!M_AXIS_ARESETN) begin
             fifo_rd_en_d[1:0] <= 0;
         end
         else begin
             fifo_rd_en_d[1:0] <= {fifo_rd_en_d[0], fifo_rd_en};
         end
     end
-    always @(posedge m_aclk or negedge m_aresetn) begin
-        if(!m_aresetn) begin
+    always @(posedge M_AXIS_ACLK or negedge M_AXIS_ARESETN) begin
+        if(!M_AXIS_ARESETN) begin
             tx_data <= 0;
             tx_cnt <= 0;
         end
