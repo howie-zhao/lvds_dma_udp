@@ -110,20 +110,23 @@ module lvds_recv #(
         end
     end
 /**************************************************************************************/
-//异步FIFO，packet mode
-    fifo u_fifo_recv(
+//异步FIFO，packet mode,深度8192
+    fifo_generator_0 u_fifo_recv(
         .wr_clk       (CLK_IN),
         .rd_clk       (M_AXIS_ACLK),
-        .srst         (~rst_n),
+        .rst          (~rst_n),
         .wr_en        (fifo_wr_en),
         .rd_en        (fifo_rd_en),
-        .din          (fifo_wr_data),
-        .dout         (fifo_rd_data),
+        .din          (fifo_wr_data),  //width 16
+        .dout         (fifo_rd_data),  //width 32
         .empty        (empty),
         .full         (full),
         .overflow     (overflow),
         .underflow    (underflow),
-        .rd_data_count(rd_data_cnt)
+        .rd_data_count(rd_data_cnt),
+        .prog_full    (prog_full),//阈值 2048byte
+        .wr_rst_busy  (),
+        .rd_rst_busy  ()
     );
 /**************************************************************************************/
 //FIFO的 AXI stream 接口设计
