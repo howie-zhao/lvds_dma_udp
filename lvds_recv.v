@@ -1,9 +1,8 @@
 `define ZYNQ_PS_EMIO_IIC 1
-
 /**************************************************************************************/
 module lvds_recv #(
     parameter DW = 15,
-    parameter FRAME_NUM = 1024,
+    parameter FRAME_NUM = 1024,//一帧UDP数据包的字节数
     parameter M_AXIS_TDATA_WIDTH = 32
 )(
     input wire [DW-1:0] DATA_P, //输入15位数据信号的p端
@@ -13,14 +12,14 @@ module lvds_recv #(
 `ifndef ZYNQ_PS_EMIO_IIC
     output wire SCL,
     inout wire SDA,
+    output wire RST_D, //给A1100数字部分的复位信号 RSTN
+    output wire RST_A,  //给A1100模拟部分的复位信号 XSHUTDOWN
 `endif
     // Clock and reset
     input wire clk, //模块时钟 100M
     input wire rst_n, //模块复位信号
     input wire CLK_P, //来自A1100的输入时钟，相对于pdata有一定的滞后 频率：250M 125M 62.5M
     input wire CLK_N, 
-    output wire RST_D, //给A1100数字部分的复位信号 RSTN
-    output wire RST_A,  //给A1100模拟部分的复位信号 XSHUTDOWN
     // AXI Stream Interface
     input wire M_AXIS_ACLK,
     input wire M_AXIS_ARESETN,
@@ -38,17 +37,39 @@ module lvds_recv #(
     wire sda_en;
     wire sda_i;
     wire sda_o;
+    // IIC Drive
     assign sda_en = sda_o;
     assign SCL = sclk;
     assign SDA = sda_en ? 1'bz : sda_o;
-    assign sda_i = SDA; 
+    assign sda_i = SDA;
+    // RST Drive
+    assign RST_D = 1;
+    assign RST_A = 1;
 `endif
+    // DATA signals
     wire [DW-1:0] DATA_IN; //单端数据信号
     wire CLK_IN; //单端时钟信号
     reg [DW-1:0] data_r;
     reg group_r;
+    
+    // FIFO signals
     wire [DW:0] fifo_wr_data;
     reg fifo_wr_en;
+    reg [7:0] fifo_wr_cnt;
+    wire fifo_rd_en;
+    reg [1:0] fifo_rd_en_d;
+    wire [M_AXIS_TDATA_WIDTH-1:0] fifo_rd_data;
+    wire empty;
+    wire full;
+    wire overflow, underflow;
+    wire [10:0] rd_data_cnt;
+    wire prog_full;
+
+    // Interface and Logic signals
+    reg tx_valid;
+    reg [8:0] tx_cnt;
+    wire tx_done;
+    reg [M_AXIS_TDATA_WIDTH-1:0] tx_data;
 /**************************************************************************************/
 //差分输入转单端
     genvar i;
@@ -110,7 +131,9 @@ module lvds_recv #(
         end
     end
 /**************************************************************************************/
-//异步FIFO，packet mode,深度8192
+//异步FIFO，packet mode,深度8192字节
+//WR 16 x 4096
+//RD 32 x 2048
     fifo_generator_0 u_fifo_recv(
         .wr_clk       (CLK_IN),
         .rd_clk       (M_AXIS_ACLK),
@@ -123,8 +146,8 @@ module lvds_recv #(
         .full         (full),
         .overflow     (overflow),
         .underflow    (underflow),
-        .rd_data_count(rd_data_cnt),
-        .prog_full    (prog_full),//阈值 2048byte
+        .rd_data_count(rd_data_cnt),//1~2048
+        .prog_full    (prog_full),//阈值 512x2=1024字节
         .wr_rst_busy  (),
         .rd_rst_busy  ()
     );
@@ -138,11 +161,13 @@ module lvds_recv #(
     assign M_AXIS_TDATA = tx_data;
     assign M_AXIS_TSTRB = {(M_AXIS_TDATA_WIDTH/8){1'b1}};
 
-    always @(posedge M_AXIS_ACLK or negedge M_AXIS_ARESETN) begin
+    always @(posedge M_AXIS_ACLK) begin
         if(!M_AXIS_ARESETN) begin
             tx_valid <= 0;
         end
-        else if(rd_data_cnt >= FRAME_NUM) begin
+        //packet mode
+        //读FIFO中有一帧数据时，读有效
+        else if(rd_data_cnt >= (FRAME_NUM/4)) begin
             tx_valid <= 1;
         end
         else if(tx_done) begin
@@ -150,7 +175,7 @@ module lvds_recv #(
         end
     end
     assign fifo_rd_en = tx_valid & M_AXIS_TREADY;
-    always @(posedge M_AXIS_ACLK or negedge M_AXIS_ARESETN) begin
+    always @(posedge M_AXIS_ACLK) begin
         if(!M_AXIS_ARESETN) begin
             fifo_rd_en_d[1:0] <= 0;
         end
@@ -158,7 +183,7 @@ module lvds_recv #(
             fifo_rd_en_d[1:0] <= {fifo_rd_en_d[0], fifo_rd_en};
         end
     end
-    always @(posedge M_AXIS_ACLK or negedge M_AXIS_ARESETN) begin
+    always @(posedge M_AXIS_ACLK) begin
         if(!M_AXIS_ARESETN) begin
             tx_data <= 0;
             tx_cnt <= 0;
@@ -171,5 +196,5 @@ module lvds_recv #(
             tx_cnt <= 0;
         end
     end
-    assign tx_done = (tx_cnt == FRAME_NUM);
+    assign tx_done = (tx_cnt == (FRAME_NUM/4));//一帧包括1024字节，数据位宽为4字节，总共256个数据
 endmodule //lvds_recv
